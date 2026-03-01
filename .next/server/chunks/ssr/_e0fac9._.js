@@ -252,7 +252,7 @@ function Navigation() {
                             columnNumber: 15
                         }, this),
                         isUserMenuOpen && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$future$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                            className: "absolute right-0 mt-2 w-56 shadow-xl z-50",
+                            className: "absolute right-0 mt-2 w-64 shadow-xl z-50",
                             style: {
                                 borderRadius: '24px',
                                 background: 'linear-gradient(135deg, rgba(128, 0, 32, 0.2) 0%, rgba(30, 58, 138, 0.2) 100%)',
@@ -261,11 +261,11 @@ function Navigation() {
                                 boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)'
                             },
                             children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$future$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: "py-3",
+                                className: "py-6",
                                 children: [
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$future$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$link$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["default"], {
                                         href: "/profile",
-                                        className: "flex items-center px-5 py-4 text-base font-medium mb-2",
+                                        className: "flex items-center px-6 py-4 text-base font-medium mb-6",
                                         style: {
                                             color: '#f4d03f',
                                             textShadow: '0 1px 3px rgba(244, 208, 63, 0.3)'
@@ -273,7 +273,7 @@ function Navigation() {
                                         onClick: ()=>setIsUserMenuOpen(false),
                                         children: [
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$future$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$lucide$2d$react$2f$dist$2f$esm$2f$icons$2f$user$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__$3c$export__default__as__User$3e$__["User"], {
-                                                className: "h-5 w-5 mr-3",
+                                                className: "h-5 w-5 mr-4",
                                                 style: {
                                                     color: '#f4d03f'
                                                 }
@@ -294,14 +294,14 @@ function Navigation() {
                                             logout();
                                             setIsUserMenuOpen(false);
                                         },
-                                        className: "flex items-center px-5 py-4 text-base font-medium cursor-pointer",
+                                        className: "flex items-center px-6 py-4 text-base font-medium cursor-pointer",
                                         style: {
                                             color: '#f4d03f',
                                             textShadow: '0 1px 3px rgba(244, 208, 63, 0.3)'
                                         },
                                         children: [
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$future$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$lucide$2d$react$2f$dist$2f$esm$2f$icons$2f$log$2d$out$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__$3c$export__default__as__LogOut$3e$__["LogOut"], {
-                                                className: "h-5 w-5 mr-3",
+                                                className: "h-5 w-5 mr-4",
                                                 style: {
                                                     color: '#f4d03f'
                                                 }

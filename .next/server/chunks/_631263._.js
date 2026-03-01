@@ -133,7 +133,8 @@ class AdvancedAIService {
             'cardiffnlp/twitter-roberta-base-sentiment-latest',
             'nlptown/bert-base-multilingual-uncased-sentiment'
         ];
-        for (const model of models){
+        // Run all models in parallel and aggregate their outputs to avoid single-model bias
+        const promises = models.map(async (model)=>{
             try {
                 const response = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
                     headers: {
@@ -145,21 +146,64 @@ class AdvancedAIService {
                         inputs: text
                     })
                 });
-                if (response.ok) {
-                    const result = await response.json();
-                    if (Array.isArray(result) && result.length > 0) {
-                        const topResult = result[0];
-                        return {
-                            sentiment: this.normalizeSentiment(topResult.label),
-                            confidence: topResult.score
-                        };
-                    }
-                }
+                if (!response.ok) return null;
+                const result = await response.json();
+                if (!Array.isArray(result) || result.length === 0) return null;
+                // Some HF model endpoints return arrays of label/score objects, some return different shapes
+                const payload = result[0];
+                return {
+                    model,
+                    payload
+                };
             } catch (error) {
                 console.error(`Sentiment analysis with ${model} failed:`, error);
+                return null;
+            }
+        });
+        const outputs = (await Promise.all(promises)).filter(Boolean);
+        if (outputs.length === 0) throw new Error('All sentiment analysis models failed');
+        // Tally scores by normalized sentiment
+        const scoreTotals = {
+            positive: 0,
+            negative: 0,
+            neutral: 0
+        };
+        let contributors = 0;
+        for (const out of outputs){
+            const { model, payload } = out;
+            // payload may be [{label, score}, ...] or [{"label":"1 star","score":...}]
+            if (Array.isArray(payload)) {
+                // Many HF models return array of {label, score}
+                for (const item of payload){
+                    const label = item.label || item[0];
+                    const score = typeof item.score === 'number' ? item.score : item[1] || 0;
+                    const normalized = this.normalizeSentimentLabelForModel(model, label);
+                    if (normalized) {
+                        scoreTotals[normalized] = scoreTotals[normalized] + score;
+                        contributors += 1;
+                        break;
+                    }
+                }
+            } else if (payload.label) {
+                const label = payload.label;
+                const score = payload.score || 0;
+                const normalized = this.normalizeSentimentLabelForModel(model, label);
+                if (normalized) {
+                    scoreTotals[normalized] = scoreTotals[normalized] + score;
+                    contributors += 1;
+                }
             }
         }
-        throw new Error('All sentiment analysis models failed');
+        // Normalize totals to determine final sentiment
+        const finalKey = Object.keys(scoreTotals).reduce((a, b)=>scoreTotals[a] >= scoreTotals[b] ? a : b);
+        const total = scoreTotals.positive + scoreTotals.negative + scoreTotals.neutral || 1;
+        const confidenceRaw = scoreTotals[finalKey] / total;
+        // Calibrate confidence to avoid default 0.5 neutrality; map to [0.55, 0.98]
+        const confidence = Math.max(0.55, Math.min(0.98, 0.55 + (confidenceRaw - 0.33) * 0.65));
+        return {
+            sentiment: finalKey,
+            confidence
+        };
     }
     // Advanced emotion analysis
     async analyzeEmotions(text) {
@@ -442,10 +486,45 @@ class AdvancedAIService {
         });
     }
     normalizeSentiment(label) {
-        const normalized = label.toLowerCase();
-        if (normalized.includes('positive') || normalized.includes('pos')) return 'positive';
-        if (normalized.includes('negative') || normalized.includes('neg')) return 'negative';
+        const normalized = (label || '').toString().toLowerCase();
+        if (normalized.includes('positive') || normalized.includes('pos') || normalized.includes('3 stars') || normalized.includes('4 stars') || normalized.includes('5 stars')) return 'positive';
+        if (normalized.includes('negative') || normalized.includes('neg') || normalized.includes('1 star') || normalized.includes('2 stars') || normalized.includes('1 stars')) return 'negative';
+        if (normalized.includes('neutral') || normalized.includes('label_1') || normalized.includes('2 stars') || normalized === 'neutral') return 'neutral';
+        // fallback: try to parse numeric rating
+        const m = normalized.match(/(\d)/);
+        if (m) {
+            const n = parseInt(m[1], 10);
+            if (n >= 4) return 'positive';
+            if (n === 3) return 'neutral';
+            return 'negative';
+        }
         return 'neutral';
+    }
+    // Map labels produced by specific models into positive/neutral/negative
+    normalizeSentimentLabelForModel(model, label) {
+        if (!label) return null;
+        const l = label.toString().toLowerCase();
+        // Common cardiffnlp mapping: LABEL_0 negative, LABEL_1 neutral, LABEL_2 positive
+        if (l.startsWith('label_')) {
+            if (l.includes('label_0')) return 'negative';
+            if (l.includes('label_1')) return 'neutral';
+            if (l.includes('label_2')) return 'positive';
+        }
+        // nlptown returns '1 star' ... '5 stars'
+        if (l.includes('star')) {
+            const m = l.match(/(\d)\s*star/);
+            if (m) {
+                const rating = parseInt(m[1], 10);
+                if (rating >= 4) return 'positive';
+                if (rating === 3) return 'neutral';
+                return 'negative';
+            }
+        }
+        // direct labels
+        if (l.includes('positive') || l.includes('pos')) return 'positive';
+        if (l.includes('negative') || l.includes('neg')) return 'negative';
+        if (l.includes('neutral')) return 'neutral';
+        return null;
     }
     extractTFIDFKeywords(text) {
         const stopWords = new Set([
@@ -508,7 +587,7 @@ class AdvancedAIService {
         return Object.entries(wordCount).sort(([, a], [, b])=>b - a).slice(0, 5).map(([word])=>word);
     }
     fallbackAnalysis(text, language) {
-        // Simple rule-based fallback
+        // Improved rule-based fallback with simple polarity scoring and calibrated confidence
         const positiveWords = [
             'good',
             'great',
@@ -517,7 +596,10 @@ class AdvancedAIService {
             'wonderful',
             'beautiful',
             'love',
-            'perfect'
+            'perfect',
+            'nice',
+            'pleasant',
+            'enjoyed'
         ];
         const negativeWords = [
             'bad',
@@ -527,23 +609,47 @@ class AdvancedAIService {
             'hate',
             'worst',
             'disappointing',
-            'poor'
+            'poor',
+            'dirty',
+            'rude',
+            'expensive'
         ];
-        const words = text.toLowerCase().split(/\s+/);
+        const words = text.toLowerCase().replace(/[.,!?:;()]/g, '').split(/\s+/);
         const positiveCount = words.filter((word)=>positiveWords.includes(word)).length;
         const negativeCount = words.filter((word)=>negativeWords.includes(word)).length;
         let sentiment = 'neutral';
+        // polarity magnitude
+        const diff = positiveCount - negativeCount;
+        const magnitude = Math.abs(diff);
+        // Confidence calculation: when there's a clear imbalance, boost confidence above 0.5
         let confidence = 0.5;
+        if (magnitude > 0) {
+            // scale confidence based on magnitude and message length
+            const scale = Math.min(1, magnitude / Math.max(1, words.length * 0.2));
+            confidence = Math.max(0.55, 0.55 + scale * 0.4) // yields between 0.55 and 0.95
+            ;
+        }
         if (positiveCount > negativeCount) {
             sentiment = 'positive';
-            confidence = Math.min(0.8, 0.5 + (positiveCount - negativeCount) * 0.1);
         } else if (negativeCount > positiveCount) {
             sentiment = 'negative';
-            confidence = Math.min(0.8, 0.5 + (negativeCount - positiveCount) * 0.1);
+        } else {
+            // attempt light-weight emotion cues to break ties
+            const lower = text.toLowerCase();
+            if (lower.includes('not bad') || lower.includes("it's okay") || lower.includes('okay')) {
+                sentiment = 'neutral';
+                confidence = Math.max(0.5, confidence - 0.05);
+            } else if (lower.match(/\b(love|enjoy|fantastic|excellent)\b/)) {
+                sentiment = 'positive';
+                confidence = Math.max(confidence, 0.6);
+            } else if (lower.match(/\b(hate|disappoint|terrible|awful)\b/)) {
+                sentiment = 'negative';
+                confidence = Math.max(confidence, 0.6);
+            }
         }
         return {
             sentiment,
-            confidence,
+            confidence: Math.round(confidence * 100) / 100,
             emotions: {
                 joy: sentiment === 'positive' ? confidence * 0.8 : 0.1,
                 anger: sentiment === 'negative' ? confidence * 0.6 : 0.1,

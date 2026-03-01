@@ -70,7 +70,7 @@ export class AdvancedAIService {
       )
 
       return {
-        sentiment: sentimentResult.status === 'fulfilled' ? sentimentResult.value.sentiment : 'neutral',
+        sentiment: sentimentResult.status === 'fulfilled' ? (sentimentResult.value.sentiment as 'positive' | 'negative' | 'neutral') : 'neutral',
         confidence: sentimentResult.status === 'fulfilled' ? sentimentResult.value.confidence : 0.5,
         emotions: emotionResult.status === 'fulfilled' ? emotionResult.value : {},
         keywords,
@@ -91,13 +91,13 @@ export class AdvancedAIService {
     try {
       // Convert audio to text using Hugging Face Whisper
       const transcription = await this.speechToText(audioBlob)
-      
+
       // Analyze the transcribed text
       const textAnalysis = await this.analyzeText(transcription)
-      
+
       // Analyze voice tone and emotions from audio
       const voiceEmotions = await this.analyzeVoiceEmotions(audioBlob)
-      
+
       return {
         transcription,
         sentiment: textAnalysis.sentiment,
@@ -117,7 +117,7 @@ export class AdvancedAIService {
     try {
       // Convert image to base64
       const base64Image = await this.blobToBase64(imageBlob)
-      
+
       // Analyze image content using Hugging Face Vision models
       const [description, objects, sentiment] = await Promise.all([
         this.generateImageDescription(base64Image),
@@ -127,7 +127,7 @@ export class AdvancedAIService {
 
       // Assess image quality
       const quality = await this.assessImageQuality(base64Image)
-      
+
       // Detect potential issues
       const issues = await this.detectImageIssues(base64Image, objects)
 
@@ -171,13 +171,14 @@ export class AdvancedAIService {
   }
 
   // Enhanced sentiment analysis with multiple models
-  private async analyzeSentiment(text: string, language: string): Promise<{sentiment: string, confidence: number}> {
+  private async analyzeSentiment(text: string, language: string): Promise<{ sentiment: string, confidence: number }> {
     const models = [
       'cardiffnlp/twitter-roberta-base-sentiment-latest',
       'nlptown/bert-base-multilingual-uncased-sentiment'
     ]
 
-    for (const model of models) {
+    // Run all models in parallel and aggregate their outputs to avoid single-model bias
+    const promises = models.map(async (model) => {
       try {
         const response = await fetch(
           `https://api-inference.huggingface.co/models/${model}`,
@@ -191,22 +192,61 @@ export class AdvancedAIService {
           }
         )
 
-        if (response.ok) {
-          const result = await response.json()
-          if (Array.isArray(result) && result.length > 0) {
-            const topResult = result[0]
-            return {
-              sentiment: this.normalizeSentiment(topResult.label),
-              confidence: topResult.score
-            }
-          }
-        }
+        if (!response.ok) return null
+        const result = await response.json()
+        if (!Array.isArray(result) || result.length === 0) return null
+
+        // Some HF model endpoints return arrays of label/score objects, some return different shapes
+        const payload = result[0]
+        return { model, payload }
       } catch (error) {
         console.error(`Sentiment analysis with ${model} failed:`, error)
+        return null
+      }
+    })
+
+    const outputs = (await Promise.all(promises)).filter(Boolean) as any[]
+    if (outputs.length === 0) throw new Error('All sentiment analysis models failed')
+
+    // Tally scores by normalized sentiment
+    const scoreTotals: { [k: string]: number } = { positive: 0, negative: 0, neutral: 0 }
+    let contributors = 0
+
+    for (const out of outputs) {
+      const { model, payload } = out
+      // payload may be [{label, score}, ...] or [{"label":"1 star","score":...}]
+      if (Array.isArray(payload)) {
+        // Many HF models return array of {label, score}
+        for (const item of payload) {
+          const label = item.label || item[0]
+          const score = typeof item.score === 'number' ? item.score : (item[1] || 0)
+          const normalized = this.normalizeSentimentLabelForModel(model, label)
+          if (normalized) {
+            scoreTotals[normalized] = scoreTotals[normalized] + score
+            contributors += 1
+            break
+          }
+        }
+      } else if (payload.label) {
+        const label = payload.label
+        const score = payload.score || 0
+        const normalized = this.normalizeSentimentLabelForModel(model, label)
+        if (normalized) {
+          scoreTotals[normalized] = scoreTotals[normalized] + score
+          contributors += 1
+        }
       }
     }
 
-    throw new Error('All sentiment analysis models failed')
+    // Normalize totals to determine final sentiment
+    const finalKey = Object.keys(scoreTotals).reduce((a, b) => scoreTotals[a] >= scoreTotals[b] ? a : b)
+    const total = scoreTotals.positive + scoreTotals.negative + scoreTotals.neutral || 1
+    const confidenceRaw = scoreTotals[finalKey] / total
+
+    // Calibrate confidence to avoid default 0.5 neutrality; map to [0.55, 0.98]
+    const confidence = Math.max(0.55, Math.min(0.98, 0.55 + (confidenceRaw - 0.33) * 0.65))
+
+    return { sentiment: finalKey, confidence }
   }
 
   // Advanced emotion analysis
@@ -283,8 +323,8 @@ export class AdvancedAIService {
             inputs: text,
             parameters: {
               candidate_labels: [
-                'accommodation', 'food', 'transportation', 'attractions', 
-                'service quality', 'cleanliness', 'safety', 'pricing', 
+                'accommodation', 'food', 'transportation', 'attractions',
+                'service quality', 'cleanliness', 'safety', 'pricing',
                 'accessibility', 'cultural experience'
               ]
             }
@@ -332,7 +372,7 @@ export class AdvancedAIService {
 
       // Combine with TF-IDF keywords
       const tfidfKeywords = this.extractTFIDFKeywords(text)
-      
+
       return [...new Set([...entities, ...tfidfKeywords])].slice(0, 10)
     } catch (error) {
       console.error('Advanced keyword extraction failed:', error)
@@ -343,26 +383,26 @@ export class AdvancedAIService {
   // Generate actionable insights using AI
   private async generateActionableInsights(text: string, language: string): Promise<string[]> {
     const insights: string[] = []
-    
+
     // Rule-based insights for now (can be enhanced with GPT-4 later)
     const lowercaseText = text.toLowerCase()
-    
+
     if (lowercaseText.includes('dirty') || lowercaseText.includes('unclean')) {
       insights.push('Immediate cleaning and hygiene improvement required')
     }
-    
+
     if (lowercaseText.includes('expensive') || lowercaseText.includes('overpriced')) {
       insights.push('Review pricing strategy and provide value justification')
     }
-    
+
     if (lowercaseText.includes('rude') || lowercaseText.includes('unprofessional')) {
       insights.push('Staff training and customer service improvement needed')
     }
-    
+
     if (lowercaseText.includes('unsafe') || lowercaseText.includes('dangerous')) {
       insights.push('URGENT: Safety assessment and security measures required')
     }
-    
+
     if (lowercaseText.includes('beautiful') || lowercaseText.includes('amazing')) {
       insights.push('Leverage positive aspects in marketing and promotion')
     }
@@ -494,16 +534,16 @@ export class AdvancedAIService {
   // Detect issues in images
   private async detectImageIssues(base64Image: string, objects: string[]): Promise<string[]> {
     const issues: string[] = []
-    
+
     // Rule-based issue detection
     if (objects.includes('trash') || objects.includes('garbage')) {
       issues.push('Cleanliness issue detected')
     }
-    
+
     if (objects.includes('damage') || objects.includes('broken')) {
       issues.push('Infrastructure damage detected')
     }
-    
+
     return issues
   }
 
@@ -524,10 +564,49 @@ export class AdvancedAIService {
   }
 
   private normalizeSentiment(label: string): 'positive' | 'negative' | 'neutral' {
-    const normalized = label.toLowerCase()
-    if (normalized.includes('positive') || normalized.includes('pos')) return 'positive'
-    if (normalized.includes('negative') || normalized.includes('neg')) return 'negative'
+    const normalized = (label || '').toString().toLowerCase()
+    if (normalized.includes('positive') || normalized.includes('pos') || normalized.includes('3 stars') || normalized.includes('4 stars') || normalized.includes('5 stars')) return 'positive'
+    if (normalized.includes('negative') || normalized.includes('neg') || normalized.includes('1 star') || normalized.includes('2 stars') || normalized.includes('1 stars')) return 'negative'
+    if (normalized.includes('neutral') || normalized.includes('label_1') || normalized.includes('2 stars') || normalized === 'neutral') return 'neutral'
+    // fallback: try to parse numeric rating
+    const m = normalized.match(/(\d)/)
+    if (m) {
+      const n = parseInt(m[1], 10)
+      if (n >= 4) return 'positive'
+      if (n === 3) return 'neutral'
+      return 'negative'
+    }
     return 'neutral'
+  }
+
+  // Map labels produced by specific models into positive/neutral/negative
+  private normalizeSentimentLabelForModel(model: string, label: string): 'positive' | 'negative' | 'neutral' | null {
+    if (!label) return null
+    const l = label.toString().toLowerCase()
+    // Common cardiffnlp mapping: LABEL_0 negative, LABEL_1 neutral, LABEL_2 positive
+    if (l.startsWith('label_')) {
+      if (l.includes('label_0')) return 'negative'
+      if (l.includes('label_1')) return 'neutral'
+      if (l.includes('label_2')) return 'positive'
+    }
+
+    // nlptown returns '1 star' ... '5 stars'
+    if (l.includes('star')) {
+      const m = l.match(/(\d)\s*star/)
+      if (m) {
+        const rating = parseInt(m[1], 10)
+        if (rating >= 4) return 'positive'
+        if (rating === 3) return 'neutral'
+        return 'negative'
+      }
+    }
+
+    // direct labels
+    if (l.includes('positive') || l.includes('pos')) return 'positive'
+    if (l.includes('negative') || l.includes('neg')) return 'negative'
+    if (l.includes('neutral')) return 'neutral'
+
+    return null
   }
 
   private extractTFIDFKeywords(text: string): string[] {
@@ -537,46 +616,67 @@ export class AdvancedAIService {
       'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that',
       'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them'
     ])
-    
+
     const words = text.toLowerCase()
       .replace(/[^\w\s]/g, '')
       .split(/\s+/)
       .filter(word => word.length > 2 && !stopWords.has(word))
-    
+
     const wordCount: { [key: string]: number } = {}
     words.forEach(word => {
       wordCount[word] = (wordCount[word] || 0) + 1
     })
-    
+
     return Object.entries(wordCount)
-      .sort(([,a], [,b]) => b - a)
+      .sort(([, a], [, b]) => b - a)
       .slice(0, 5)
       .map(([word]) => word)
   }
 
   private fallbackAnalysis(text: string, language: string): AIAnalysisResult {
-    // Simple rule-based fallback
-    const positiveWords = ['good', 'great', 'excellent', 'amazing', 'wonderful', 'beautiful', 'love', 'perfect']
-    const negativeWords = ['bad', 'terrible', 'awful', 'horrible', 'hate', 'worst', 'disappointing', 'poor']
-    
-    const words = text.toLowerCase().split(/\s+/)
+    // Improved rule-based fallback with simple polarity scoring and calibrated confidence
+    const positiveWords = ['good', 'great', 'excellent', 'amazing', 'wonderful', 'beautiful', 'love', 'perfect', 'nice', 'pleasant', 'enjoyed']
+    const negativeWords = ['bad', 'terrible', 'awful', 'horrible', 'hate', 'worst', 'disappointing', 'poor', 'dirty', 'rude', 'expensive']
+
+    const words = text.toLowerCase().replace(/[.,!?:;()]/g, '').split(/\s+/)
     const positiveCount = words.filter(word => positiveWords.includes(word)).length
     const negativeCount = words.filter(word => negativeWords.includes(word)).length
-    
+
     let sentiment: 'positive' | 'negative' | 'neutral' = 'neutral'
+    // polarity magnitude
+    const diff = positiveCount - negativeCount
+    const magnitude = Math.abs(diff)
+
+    // Confidence calculation: when there's a clear imbalance, boost confidence above 0.5
     let confidence = 0.5
-    
+    if (magnitude > 0) {
+      // scale confidence based on magnitude and message length
+      const scale = Math.min(1, magnitude / Math.max(1, words.length * 0.2))
+      confidence = Math.max(0.55, 0.55 + scale * 0.4) // yields between 0.55 and 0.95
+    }
+
     if (positiveCount > negativeCount) {
       sentiment = 'positive'
-      confidence = Math.min(0.8, 0.5 + (positiveCount - negativeCount) * 0.1)
     } else if (negativeCount > positiveCount) {
       sentiment = 'negative'
-      confidence = Math.min(0.8, 0.5 + (negativeCount - positiveCount) * 0.1)
+    } else {
+      // attempt light-weight emotion cues to break ties
+      const lower = text.toLowerCase()
+      if (lower.includes('not bad') || lower.includes("it's okay") || lower.includes('okay')) {
+        sentiment = 'neutral'
+        confidence = Math.max(0.5, confidence - 0.05)
+      } else if (lower.match(/\b(love|enjoy|fantastic|excellent)\b/)) {
+        sentiment = 'positive'
+        confidence = Math.max(confidence, 0.6)
+      } else if (lower.match(/\b(hate|disappoint|terrible|awful)\b/)) {
+        sentiment = 'negative'
+        confidence = Math.max(confidence, 0.6)
+      }
     }
-    
+
     return {
       sentiment,
-      confidence,
+      confidence: Math.round(confidence * 100) / 100,
       emotions: {
         joy: sentiment === 'positive' ? confidence * 0.8 : 0.1,
         anger: sentiment === 'negative' ? confidence * 0.6 : 0.1,

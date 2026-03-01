@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+backend/node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -104,3 +105,31 @@ temp/
 
 .next/
 
+# Build and dist directories
+/dist/
+/build/
+backend/dist/
+backend/build/
+
+# Backend Next.js cache
+backend/.next/
+
+# pnpm package manager cache (not lock files)
+.pnpm-store/
+
+# User-uploaded content (not project assets)
+public/uploads/
+
+# Local blockchain data
+blockchain_data/
+
+# Backend specific logs
+backend/npm-debug.log
+
+# Turbo build outputs
+.turbo/
+
+# Various build caches
+.cache/
+.eslintcache
+.stylelintcache

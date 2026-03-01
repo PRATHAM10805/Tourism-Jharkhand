@@ -1,4 +1,4 @@
-require('dotenv').config({ path: '../.env' });
+require('dotenv').config({ path: '.env' });
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -43,7 +43,7 @@ app.use(helmet({
 app.use(cors({
   origin: [
     'http://localhost:3000',
-    'http://localhost:3001', 
+    'http://localhost:3001',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001'
   ],
